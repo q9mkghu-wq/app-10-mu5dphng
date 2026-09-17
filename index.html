@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>드라이브 메모 패드</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    font-family: 'Segoe UI', sans-serif;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+  }
+  #toolbar {
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg, #16213e, #0f3460);
+    padding: 6px 10px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    border-bottom: 2px solid #e94560;
+    height: 64px;
+    overflow: hidden;
+  }
+  .tool-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-right: 1px solid #334;
+    padding-right: 6px;
+  }
+  .tool-group:last-child { border-right: none; }
+  button {
+    background: #0f3460;
+    border: 1px solid #334;
+    color: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  button:hover { background: #1a4a80; transform: scale(1.05); }
+  button.active { background: #e94560; border-color: #e94560; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .color-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .color-btn.selected { border-color: #fff; transform: scale(1.2); }
+  #strokeRange {
+    width: 70px;
+    accent-color: #e94560;
+    cursor: pointer;
+  }
+  #strokePreview {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: white;
+    border: 2px solid #334;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  #strokeDot {
+    border-radius: 50%;
+    background: white;
+    transition: all 0.1s;
+  }
+  .page-info {
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    white-space: nowrap;
+    min-width: 70px;
+    text-align: center;
+  }
+  #canvasContainer {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #f5f0e8;
+  }
+  canvas {
+    position: absolute;
+    top: 0; left: 0;
+    touch-action: none;
+  }
+  #bgCanvas { z-index: 1; }
+  #mainCanvas { z-index: 2; cursor: crosshair; }
+  #overlayCanvas { z-index: 3; pointer-events: none; }
+  #statusBar {
+    background: #16213e;
+    color: #8892a4;
+    font-size: 11px;
+    padding: 3px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 24px;
+    border-top: 1px solid #334;
+  }
+  /* Emoji stamp panel */
+  #stampPanel {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #16213e;
+    border: 2px solid #e94560;
+    border-radius: 16px;
+    padding: 10px;
+    display: none;
+    gap: 8px;
+    flex-wrap: wrap;
+    max-width: 360px;
+    justify-content: center;
+    z-index: 100;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  #stampPanel.open { display: flex; }
+  .stamp-btn {
+    font-size: 28px;
+    width: 48px; height: 48px;
+    background: #0f3460;
+    border: 1px solid #334;
+    border-radius: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stamp-btn:hover { background: #1a4a80; transform: scale(1.1); }
+  /* Share modal */
+  #shareModal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  #shareModal.open { display: flex; }
+  #shareBox {
+    background: #16213e;
+    border: 2px solid #e94560;
+    border-radius: 20px;
+    padding: 24px;
+    min-width: 320px;
+    color: #fff;
+  }
+  #shareBox h2 { margin-bottom: 16px; font-size: 20px; }
+  #shareBox label { display: block; margin: 8px 0 4px; font-size: 14px; color: #aaa; }
+  #shareBox select, #shareBox input {
+    width: 100%;
+    background: #0f3460;
+    border: 1px solid #334;
+    color: #fff;
+    border-radius: 8px;
+    padding: 8px;
+    font-size: 15px;
+    margin-bottom: 6px;
+  }
+  #shareBox .btn-row { display: flex; gap: 8px; margin-top: 16px; }
+  #shareBox .btn-row button { flex: 1; height: 44px; font-size: 14px; width: auto; }
+  .btn-green { background: #27ae60 !important; border-color: #27ae60 !important; }
+  .btn-red { background: #e94560 !important; border-color: #e94560 !important; }
+  /* Toast */
+  #toast {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #e94560;
+    color: #fff;
+    padding: 10px 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 300;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+  /* Highlighter cursor indicator */
+  .highlight-mode #mainCanvas { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect x='4' y='10' width='16' height='10' rx='3' fill='%23FFD700' opacity='0.7'/%3E%3C/svg%3E") 12 18, crosshair; }
+  .eraser-mode #mainCanvas { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Ccircle cx='12' cy='12' r='10' fill='white' stroke='%23999' stroke-width='2'/%3E%3C/svg%3E") 12 12, crosshair; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <!-- Draw tools -->
+  <div class="tool-group">
+    <button id="btnPen" class="active" title="펜">✏️</button>
+    <button id="btnHighlight" title="형광펜">🖍</button>
+    <button id="btnEraser" title="지우개">🧹</button>
+    <button id="btnStamp" title="이모지 스탬프">😀</button>
+  </div>
+  <!-- Colors -->
+  <div class="tool-group" id="colorGroup">
+    <div class="color-btn selected" style="background:#111111" data-color="#111111"></div>
+    <div class="color-btn" style="background:#e94560" data-color="#e94560"></div>
+    <div class="color-btn" style="background:#0077ff" data-color="#0077ff"></div>
+    <div class="color-btn" style="background:#27ae60" data-color="#27ae60"></div>
+    <div class="color-btn" style="background:#f39c12" data-color="#f39c12"></div>
+    <div class="color-btn" style="background:#9b59b6" data-color="#9b59b6"></div>
+    <div class="color-btn" style="background:#ffffff" data-color="#ffffff" style="border:2px solid #666"></div>
+  </div>
+  <!-- Stroke -->
+  <div class="tool-group">
+    <div id="strokePreview"><div id="strokeDot"></div></div>
+    <input type="range" id="strokeRange" min="1" max="30" value="4">
+  </div>
+  <!-- Undo/Redo/Clear -->
+  <div class="tool-group">
+    <button id="btnUndo" title="실행 취소">↩️</button>
+    <button id="btnRedo" title="다시 실행">↪️</button>
+    <button id="btnClear" title="이 페이지 지우기">🗑</button>
+  </div>
+  <!-- Pages -->
+  <div class="tool-group">
+    <button id="btnPrev" title="이전 페이지">◀</button>
+    <div class="page-info"><span id="pageNum">1</span>/<span id="totalPages">1</span></div>
+    <button id="btnNext" title="다음 페이지">▶</button>
+    <button id="btnAddPage" title="페이지 추가">➕</button>
+    <button id="btnDelPage" title="이 페이지 삭제">❌</button>
+  </div>
+  <!-- Save/Share -->
+  <div class="tool-group">
+    <button id="btnSave" title="저장">💾</button>
+    <button id="btnShare" title="공유/내보내기">📤</button>
+  </div>
+  <!-- BG -->
+  <div class="tool-group">
+    <button id="btnBg" title="배경 변경">🎨</button>
+  </div>
+</div>
+
+<div id="canvasContainer">
+  <canvas id="bgCanvas"></canvas>
+  <canvas id="mainCanvas"></canvas>
+  <canvas id="overlayCanvas"></canvas>
+</div>
+
+<div id="statusBar">
+  <span id="statusLeft">드라이브 메모 패드 🚗</span>
+  <span id="statusRight">저장됨</span>
+</div>
+
+<!-- Emoji stamp panel -->
+<div id="stampPanel">
+  <div class="stamp-btn" data-emoji="⭐">⭐</div>
+  <div class="stamp-btn" data-emoji="❗">❗</div>
+  <div class="stamp-btn" data-emoji="❓">❓</div>
+  <div class="stamp-btn" data-emoji="✅">✅</div>
+  <div class="stamp-btn" data-emoji="🔴">🔴</div>
+  <div class="stamp-btn" data-emoji="🟡">🟡</div>
+  <div class="stamp-btn" data-emoji="🟢">🟢</div>
+  <div class="stamp-btn" data-emoji="🔵">🔵</div>
+  <div class="stamp-btn" data-emoji="🔥">🔥</div>
+  <div class="stamp-btn" data-emoji="💡">💡</div>
+  <div class="stamp-btn" data-emoji="📌">📌</div>
+  <div class="stamp-btn" data-emoji="🚗">🚗</div>
+  <div class="stamp-btn" data-emoji="⚡">⚡</div>
+  <div class="stamp-btn" data-emoji="💬">💬</div>
+  <div class="stamp-btn" data-emoji="🏁">🏁</div>
+  <div class="stamp-btn" data-emoji="🎯">🎯</div>
+</div>
+
+<!-- Share modal -->
+<div id="shareModal">
+  <div id="shareBox">
+    <h2>📤 공유 / 내보내기</h2>
+    <label>대상 페이지</label>
+    <select id="shareTarget">
+      <option value="current">현재 페이지만</option>
+      <option value="all">전체 페이지</option>
+      <option value="range">범위 지정</option>
+    </select>
+    <div id="rangeRow" style="display:none; gap:6px; align-items:center; margin-top:4px">
+      <input type="number" id="rangeFrom" min="1" value="1" style="width:60px"> 페이지 ~
+      <input type="number" id="rangeTo" min="1" value="1" style="width:60px"> 페이지
+    </div>
+    <label>내보내기 형식</label>
+    <select id="shareFormat">
+      <option value="png">PNG 이미지 (페이지별)</option>
+      <option value="pdf">PDF (모든 페이지 합치기)</option>
+    </select>
+    <div class="btn-row">
+      <button class="btn-green" id="btnDoShare">📥 내보내기</button>
+      <button class="btn-red" id="btnCloseShare">취소</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const firebaseConfig = {"apiKey":"AIzaSyAA9XxN-Pw0vbLT0f8-mI2bV0FgEx18iIU","authDomain":"appbuilder-4e83c.firebaseapp.com","projectId":"appbuilder-4e83c","storageBucket":"appbuilder-4e83c.firebasestorage.app","messagingSenderId":"1038242551917","appId":"1:1038242551917:web:4d59995638762401dd0764"};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const COL = "apps/app-10-mu5dphng/items";
+
+// ---- State ----
+let pages = []; // [{id, strokes:[], bg:'lined', docId}]
+let currentPage = 0;
+let tool = 'pen'; // pen, highlight, eraser, stamp
+let penColor = '#111111';
+let strokeWidth = 4;
+let bgType = 'lined'; // lined, dot, blank, grid
+let selectedEmoji = '⭐';
+let isDrawing = false;
+let currentPath = [];
+let undoStack = []; // per page arrays of snapshots
+let redoStack = [];
+let autoSaveTimer = null;
+let firestoreLoaded = false;
+
+// ---- Canvas ----
+const container = document.getElementById('canvasContainer');
+const bgCanvas = document.getElementById('bgCanvas');
+const mainCanvas = document.getElementById('mainCanvas');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const bgCtx = bgCanvas.getContext('2d');
+const ctx = mainCanvas.getContext('2d');
+const ovCtx = overlayCanvas.getContext('2d');
+
+function resizeCanvases() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  [bgCanvas, mainCanvas, overlayCanvas].forEach(c => {
+    c.width = w; c.height = h;
+  });
+  drawBg();
+  renderPage();
+}
+
+// ---- Background ----
+function drawBg() {
+  const w = bgCanvas.width, h = bgCanvas.height;
+  bgCtx.clearRect(0,0,w,h);
+  const p = pages[currentPage];
+  const bg = p ? p.bg : bgType;
+  if (bg === 'blank') {
+    bgCtx.fillStyle = '#f5f0e8';
+    bgCtx.fillRect(0,0,w,h);
+  } else if (bg === 'lined') {
+    bgCtx.fillStyle = '#fdfaf3';
+    bgCtx.fillRect(0,0,w,h);
+    bgCtx.strokeStyle = '#c8d0e0';
+    bgCtx.lineWidth = 1;
+    const lineH = 48;
+    for (let y = lineH; y < h; y += lineH) {
+      bgCtx.beginPath(); bgCtx.moveTo(0,y); bgCtx.lineTo(w,y); bgCtx.stroke();
+    }
+    bgCtx.strokeStyle = '#f0a0a0';
+    bgCtx.lineWidth = 1.5;
+    bgCtx.beginPath(); bgCtx.moveTo(80,0); bgCtx.lineTo(80,h); bgCtx.stroke();
+  } else if (bg === 'grid') {
+    bgCtx.fillStyle = '#f5f9ff';
+    bgCtx.fillRect(0,0,w,h);
+    bgCtx.strokeStyle = '#c8d8ee';
+    bgCtx.lineWidth = 0.8;
+    const g = 40;
+    for (let x = 0; x < w; x += g) { bgCtx.beginPath(); bgCtx.moveTo(x,0); bgCtx.lineTo(x,h); bgCtx.stroke(); }
+    for (let y = 0; y < h; y += g) { bgCtx.beginPath(); bgCtx.moveTo(0,y); bgCtx.lineTo(w,y); bgCtx.stroke(); }
+  } else if (bg === 'dot') {
+    bgCtx.fillStyle = '#f8f8f8';
+    bgCtx.fillRect(0,0,w,h);
+    bgCtx.fillStyle = '#bbbdd0';
+    const d = 40;
+    for (let x = d; x < w; x += d) for (let y = d; y < h; y += d) {
+      bgCtx.beginPath(); bgCtx.arc(x,y,1.5,0,Math.PI*2); bgCtx.fill();
+    }
+  }
+}
+
+// ---- Render strokes ----
+function renderPage() {
+  const w = mainCanvas.width, h = mainCanvas.height;
+  ctx.clearRect(0,0,w,h);
+  const p = pages[currentPage];
+  if (!p) return;
+  p.strokes.forEach(s => drawStroke(ctx, s));
+}
+
+function drawStroke(c, s) {
+  if (!s || !s.points || s.points.length < 2) {
+    if (s && s.type === 'stamp' && s.points && s.points.length > 0) {
+      c.font = `${s.size}px serif`;
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(s.emoji, s.points[0].x, s.points[0].y);
+    }
+    return;
+  }
+  c.save();
+  if (s.type === 'highlight') {
+    c.globalAlpha = 0.35;
+    c.strokeStyle = s.color;
+    c.lineWidth = s.width * 3;
+    c.lineCap = 'square';
+    c.lineJoin = 'miter';
+  } else if (s.type === 'eraser') {
+    c.globalCompositeOperation = 'destination-out';
+    c.strokeStyle = 'rgba(0,0,0,1)';
+    c.lineWidth = s.width;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+  } else {
+    c.strokeStyle = s.color;
+    c.lineWidth = s.width;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+  }
+  c.beginPath();
+  c.moveTo(s.points[0].x, s.points[0].y);
+  for (let i = 1; i < s.points.length - 1; i++) {
+    const mx = (s.points[i].x + s.points[i+1].x) / 2;
+    const my = (s.points[i].y + s.points[i+1].y) / 2;
+    c.quadraticCurveTo(s.points[i].x, s.points[i].y, mx, my);
+  }
+  const last = s.points[s.points.length-1];
+  c.lineTo(last.x, last.y);
+  c.stroke();
+  c.restore();
+}
+
+// ---- Touch/Mouse Events ----
+function getPos(e) {
+  const rect = mainCanvas.getBoundingClientRect();
+  if (e.touches && e.touches.length > 0) {
+    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+  }
+  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+}
+
+mainCanvas.addEventListener('pointerdown', startDraw, {passive: false});
+mainCanvas.addEventListener('pointermove', moveDraw, {passive: false});
+mainCanvas.addEventListener('pointerup', endDraw, {passive: false});
+mainCanvas.addEventListener('pointercancel', endDraw, {passive: false});
+
+function startDraw(e) {
+  e.preventDefault();
+  if (tool === 'stamp') { placeStamp(getPos(e)); return; }
+  isDrawing = true;
+  currentPath = [getPos(e)];
+  mainCanvas.setPointerCapture(e.pointerId);
+}
+
+function moveDraw(e) {
+  e.preventDefault();
+  if (!isDrawing) return;
+  currentPath.push(getPos(e));
+  // draw in-progress stroke on overlay
+  ovCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  const tempStroke = buildStroke(currentPath);
+  drawStroke(ovCtx, tempStroke);
+}
+
+function endDraw(e) {
+  if (!isDrawing) return;
+  isDrawing = false;
+  ovCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+  if (currentPath.length < 2) return;
+  const stroke = buildStroke(currentPath);
+  saveUndoSnapshot();
+  pages[currentPage].strokes.push(stroke);
+  renderPage();
+  scheduleAutoSave();
+}
+
+function buildStroke(pts) {
+  return { type: tool, color: penColor, width: strokeWidth, points: pts.map(p => ({x: Math.round(p.x), y: Math.round(p.y)})) };
+}
+
+function placeStamp(pos) {
+  saveUndoSnapshot();
+  pages[currentPage].strokes.push({ type: 'stamp', emoji: selectedEmoji, size: 40, points: [{x: Math.round(pos.x), y: Math.round(pos.y)}] });
+  renderPage();
+  scheduleAutoSave();
+  document.getElementById('stampPanel').classList.remove('open');
+  setTool('pen');
+}
+
+// ---- Undo/Redo ----
+const undoHistory = []; // per-session
+const redoHistory = [];
+
+function saveUndoSnapshot() {
+  const snap = JSON.stringify(pages[currentPage].strokes);
+  undoHistory.push({ page: currentPage, snap });
+  redoHistory.length = 0;
+  updateUndoButtons();
+}
+
+function doUndo() {
+  if (undoHistory.length === 0) return;
+  const entry = undoHistory.pop();
+  if (entry.page !== currentPage) { currentPage = entry.page; updatePageUI(); }
+  const curSnap = JSON.stringify(pages[currentPage].strokes);
+  redoHistory.push({ page: currentPage, snap: curSnap });
+  pages[currentPage].strokes = JSON.parse(entry.snap);
+  renderPage();
+  scheduleAutoSave();
+  updateUndoButtons();
+}
+
+function doRedo() {
+  if (redoHistory.length === 0) return;
+  const entry = redoHistory.pop();
+  if (entry.page !== currentPage) { currentPage = entry.page; updatePageUI(); }
+  const curSnap = JSON.stringify(pages[currentPage].strokes);
+  undoHistory.push({ page: currentPage, snap: curSnap });
+  pages[currentPage].strokes = JSON.parse(entry.snap);
+  renderPage();
+  scheduleAutoSave();
+  updateUndoButtons();
+}
+
+function updateUndoButtons() {
+  document.getElementById('btnUndo').disabled = undoHistory.length === 0;
+  document.getElementById('btnRedo').disabled = redoHistory.length === 0;
+}
+
+// ---- Tool selection ----
+function setTool(t) {
+  tool = t;
+  document.getElementById('btnPen').classList.toggle('active', t === 'pen');
+  document.getElementById('btnHighlight').classList.toggle('active', t === 'highlight');
+  document.getElementById('btnEraser').classList.toggle('active', t === 'eraser');
+  document.getElementById('btnStamp').classList.toggle('active', t === 'stamp');
+  container.className = t === 'highlight' ? 'highlight-mode' : t === 'eraser' ? 'eraser-mode' : '';
+}
+
+document.getElementById('btnPen').onclick = () => { setTool('pen'); document.getElementById('stampPanel').classList.remove('open'); };
+document.getElementById('btnHighlight').onclick = () => { setTool('highlight'); document.getElementById('stampPanel').classList.remove('open'); };
+document.getElementById('btnEraser').onclick = () => { setTool('eraser'); document.getElementById('stampPanel').classList.remove('open'); };
+document.getElementById('btnStamp').onclick = () => {
+  const p = document.getElementById('stampPanel');
+  p.classList.toggle('open');
+  if (p.classList.contains('open')) setTool('stamp'); else setTool('pen');
+};
+
+// Stamp panel
+document.querySelectorAll('.stamp-btn').forEach(btn => {
+  btn.onclick = () => {
+    selectedEmoji = btn.dataset.emoji;
+    setTool('stamp');
+    document.getElementById('stampPanel').classList.remove('open');
+    showToast(`${selectedEmoji} 스탬프 선택됨 — 캔버스를 탭하세요`);
+  };
+});
+
+// Colors
+document.querySelectorAll('.color-btn').forEach(btn => {
+  btn.onclick = () => {
+    penColor = btn.dataset.color;
+    document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    if (tool === 'eraser') setTool('pen');
+    updateStrokePreview();
+  };
+});
+
+// Stroke width
+const strokeRange = document.getElementById('strokeRange');
+strokeRange.oninput = () => { strokeWidth = parseInt(strokeRange.value); updateStrokePreview(); };
+function updateStrokePreview() {
+  const dot = document.getElementById('strokeDot');
+  const size = Math.max(2, Math.min(strokeWidth * 1.5, 28));
+  dot.style.width = size + 'px';
+  dot.style.height = size + 'px';
+  dot.style.background = tool === 'eraser' ? '#888' : penColor;
+}
+updateStrokePreview();
+
+// ---- Undo/Redo buttons ----
+document.getElementById('btnUndo').onclick = doUndo;
+document.getElementById('btnRedo').onclick = doRedo;
+updateUndoButtons();
+
+// ---- Clear page ----
+document.getElementById('btnClear').onclick = () => {
+  if (!confirm(`페이지 ${currentPage+1}의 내용을 모두 지울까요?`)) return;
+  saveUndoSnapshot();
+  pages[currentPage].strokes = [];
+  renderPage();
+  scheduleAutoSave();
+};
+
+// ---- Background cycle ----
+const bgTypes = ['lined','grid','dot','blank'];
+let bgIdx = 0;
+document.getElementById('btnBg').onclick = () => {
+  bgIdx = (bgIdx + 1) % bgTypes.length;
+  pages[currentPage].bg = bgTypes[bgIdx];
+  drawBg();
+  const names = {lined:'줄 노트',grid:'격자',dot:'점선',blank:'빈 페이지'};
+  showToast('배경: ' + names[bgTypes[bgIdx]]);
+  scheduleAutoSave();
+};
+
+// ---- Pages ----
+function addPage() {
+  pages.push({ strokes: [], bg: bgType, docId: null });
+  currentPage = pages.length - 1;
+  updatePageUI();
+  drawBg();
+  renderPage();
+  scheduleAutoSave();
+}
+
+document.getElementById('btnAddPage').onclick = addPage;
+document.getElementById('btnPrev').onclick = () => {
+  if (currentPage > 0) { currentPage--; updatePageUI(); drawBg(); renderPage(); }
+};
+document.getElementById('btnNext').onclick = () => {
+  if (currentPage < pages.length - 1) { currentPage++; updatePageUI(); drawBg(); renderPage(); }
+  else { addPage(); showToast('새 페이지 추가됨'); }
+};
+document.getElementById('btnDelPage').onclick = () => {
+  if (pages.length === 1) { showToast('마지막 페이지는 삭제할 수 없어요'); return; }
+  if (!confirm(`페이지 ${currentPage+1}을 삭제할까요?`)) return;
+  const docId = pages[currentPage].docId;
+  if (docId) db.collection(COL).doc(docId).delete();
+  pages.splice(currentPage, 1);
+  if (currentPage >= pages.length) currentPage = pages.length - 1;
+  updatePageUI(); drawBg(); renderPage();
+};
+
+function updatePageUI() {
+  document.getElementById('pageNum').textContent = currentPage + 1;
+  document.getElementById('totalPages').textContent = pages.length;
+  document.getElementById('btnPrev').disabled = currentPage === 0;
+  const bgIdx2 = bgTypes.indexOf(pages[currentPage] ? pages[currentPage].bg : bgType);
+  bgIdx = bgIdx2 >= 0 ? bgIdx2 : 0;
+}
+
+// ---- Save ----
+document.getElementById('btnSave').onclick = () => { saveToFirestore(true); };
+
+function scheduleAutoSave() {
+  document.getElementById('statusRight').textContent = '저장 중...';
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => saveToFirestore(false), 2000);
+}
+
+async function saveToFirestore(showMsg) {
+  try {
+    for (let i = 0; i < pages.length; i++) {
+      const p = pages[i];
+      const data = { pageIndex: i, bg: p.bg, strokes: JSON.stringify(p.strokes), updatedAt: Date.now() };
+      if (p.docId) {
+        await db.collection(COL).doc(p.docId).set(data);
+      } else {
+        const ref = await db.collection(COL).add(data);
+        pages[i].docId = ref.id;
+      }
+    }
+    document.getElementById('statusRight').textContent = `저장됨 ${new Date().toLocaleTimeString()}`;
+    if (showMsg) showToast('💾 저장 완료!');
+  } catch(err) {
+    document.getElementById('statusRight').textContent = '저장 오류';
+    if (showMsg) showToast('저장 실패: ' + err.message);
+  }
+}
+
+async function loadFromFirestore() {
+  try {
+    const snap = await db.collection(COL).orderBy('pageIndex').get();
+    if (!snap.empty) {
+      pages = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        pages.push({ strokes: JSON.parse(d.strokes || '[]'), bg: d.bg || 'lined', docId: doc.id });
+      });
+    } else {
+      if (pages.length === 0) pages = [{ strokes: [], bg: 'lined', docId: null }];
+    }
+    firestoreLoaded = true;
+    currentPage = 0;
+    updatePageUI();
+    drawBg();
+    renderPage();
+    showToast('📂 메모를 불러왔어요');
+  } catch(err) {
+    if (pages.length === 0) pages = [{ strokes: [], bg: 'lined', docId: null }];
+    updatePageUI(); drawBg(); renderPage();
+  }
+}
+
+// ---- Share/Export ----
+document.getElementById('btnShare').onclick = () => {
+  document.getElementById('rangeTo').value = pages.length;
+  document.getElementById('shareModal').classList.add('open');
+};
+document.getElementById('btnCloseShare').onclick = () => document.getElementById('shareModal').classList.remove('open');
+document.getElementById('shareTarget').onchange = function() {
+  document.getElementById('rangeRow').style.display = this.value === 'range' ? 'flex' : 'none';
+};
+
+document.getElementById('btnDoShare').onclick = async () => {
+  const target = document.getElementById('shareTarget').value;
+  const fmt = document.getElementById('shareFormat').value;
+  let pageIndices = [];
+  if (target === 'current') { pageIndices = [currentPage]; }
+  else if (target === 'all') { pageIndices = pages.map((_, i) => i); }
+  else {
+    const from = parseInt(document.getElementById('rangeFrom').value) - 1;
+    const to = parseInt(document.getElementById('rangeTo').value) - 1;
+    for (let i = from; i <= to && i < pages.length; i++) pageIndices.push(i);
+  }
+  if (pageIndices.length === 0) { showToast('내보낼 페이지가 없어요'); return; }
+  document.getElementById('shareModal').classList.remove('open');
+  showToast('📤 내보내는 중...');
+
+  // Build off-screen canvases
+  const W = mainCanvas.width, H = mainCanvas.height;
+  const canvases = [];
+  for (const idx of pageIndices) {
+    const oc = document.createElement('canvas');
+    oc.width = W; oc.height = H;
+    const oCx = oc.getContext('2d');
+    // Draw bg
+    const tempBg = document.createElement('canvas');
+    tempBg.width = W; tempBg.height = H;
+    const tbCtx = tempBg.getContext('2d');
+    const pg = pages[idx];
+    const bg = pg.bg;
+    if (bg === 'blank') { tbCtx.fillStyle='#f5f0e8'; tbCtx.fillRect(0,0,W,H); }
+    else if (bg === 'lined') {
+      tbCtx.fillStyle='#fdfaf3'; tbCtx.fillRect(0,0,W,H);
+      tbCtx.strokeStyle='#c8d0e0'; tbCtx.lineWidth=1;
+      for (let y=48;y<H;y+=48){tbCtx.beginPath();tbCtx.moveTo(0,y);tbCtx.lineTo(W,y);tbCtx.stroke();}
+      tbCtx.strokeStyle='#f0a0a0'; tbCtx.lineWidth=1.5;
+      tbCtx.beginPath();tbCtx.moveTo(80,0);tbCtx.lineTo(80,H);tbCtx.stroke();
+    } else if (bg === 'grid') {
+      tbCtx.fillStyle='#f5f9ff'; tbCtx.fillRect(0,0,W,H);
+      tbCtx.strokeStyle='#c8d8ee'; tbCtx.lineWidth=0.8;
+      for(let x=0;x<W;x+=40){tbCtx.beginPath();tbCtx.moveTo(x,0);tbCtx.lineTo(x,H);tbCtx.stroke();}
+      for(let y=0;y<H;y+=40){tbCtx.beginPath();tbCtx.moveTo(0,y);tbCtx.lineTo(W,y);tbCtx.stroke();}
+    } else {
+      tbCtx.fillStyle='#f8f8f8'; tbCtx.fillRect(0,0,W,H);
+      tbCtx.fillStyle='#bbbdd0';
+      for(let x=40;x<W;x+=40) for(let y=40;y<H;y+=40){tbCtx.beginPath();tbCtx.arc(x,y,1.5,0,Math.PI*2);tbCtx.fill();}
+    }
+    oCx.drawImage(tempBg, 0, 0);
+    // Draw strokes
+    pg.strokes.forEach(s => drawStroke(oCx, s));
+    // Page number watermark
+    oCx.save();
+    oCx.fillStyle='rgba(100,100,100,0.3)';
+    oCx.font='16px sans-serif';
+    oCx.textAlign='right';
+    oCx.fillText(`${idx+1}/${pages.length}`, W-16, H-10);
+    oCx.restore();
+    canvases.push(oc);
+  }
+
+  if (fmt === 'png') {
+    canvases.forEach((c, i) => {
+      const a = document.createElement('a');
+      a.href = c.toDataURL('image/png');
+      a.download = `메모_페이지${pageIndices[i]+1}.png`;
+      a.click();
+    });
+    showToast(`🖼 ${canvases.length}개 이미지 저장!`);
+  } else {
+    // Simple PDF using jsPDF-like approach via data URLs + print
+    // We'll create a printable page
+    const w2 = window.open('', '_blank');
+    if (!w2) { showToast('팝업 차단 해제 후 다시 시도하세요'); return; }
+    let html = `<html><head><title>드라이브 메모 내보내기</title><style>
+      body{margin:0;background:#fff;}
+      img{display:block;width:100%;page-break-after:always;max-width:${W}px;}
+      @media print{img{page-break-after:always;}}
+    </style></head><body>`;
+    canvases.forEach(c => { html += `<img src="${c.toDataURL('image/png')}"><br>`; });
+    html += `<script>window.onload=()=>{window.print();}<\/script></body></html>`;
+    w2.document.write(html);
+    w2.document.close();
+    showToast('🖨 인쇄/PDF 창이 열렸어요');
+  }
+};
+
+// ---- Toast ----
+function showToast(msg, dur=2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ---- Keyboard shortcuts ----
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'z') { e.preventDefault(); doUndo(); }
+    if (e.key === 'y') { e.preventDefault(); doRedo(); }
+    if (e.key === 's') { e.preventDefault(); saveToFirestore(true); }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); document.getElementById('btnPrev').click(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); document.getElementById('btnNext').click(); }
+  }
+  if (e.key === 'ArrowLeft' && !e.ctrlKey) document.getElementById('btnPrev').click();
+  if (e.key === 'ArrowRight' && !e.ctrlKey) document.getElementById('btnNext').click();
+});
+
+// ---- Status left ----
+function updateStatusLeft() {
+  const toolNames = { pen: '✏️ 펜', highlight: '🖍 형광펜', eraser: '🧹 지우개', stamp: `😀 스탬프 (${selectedEmoji})` };
+  document.getElementById('statusLeft').textContent = `${toolNames[tool]} | 굵기 ${strokeWidth}px | 페이지 ${currentPage+1}/${pages.length}`;
+}
+setInterval(updateStatusLeft, 500);
+
+// ---- Init ----
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
+loadFromFirestore();
+</script>
+</body>
+</html>
